@@ -1,0 +1,16 @@
+{
+  "input_dir": "stage1-autotag",
+  "output_dir": "stage2-fixed",
+  "files": [
+    {
+      "filename": "my-document_tagged.pdf",
+      "title": "The exact title that should appear in screen readers and the browser title bar",
+      "lang": "en-US"
+    },
+    {
+      "filename": "another-doc_tagged.pdf",
+      "title": "Another document title",
+      "lang": "en-US"
+    }
+  ]
+}
