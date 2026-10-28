@@ -1,4 +1,4 @@
-# Maryland AI Skill Docs
+# Maryland Agent Skills
 
 A collection of [Agent Skills](https://agentskills.io/) that teach AI coding assistants how to work with Maryland state government systems correctly. Maintained by the Maryland State Innovation Team.
 
