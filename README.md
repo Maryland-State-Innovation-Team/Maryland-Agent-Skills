@@ -17,7 +17,7 @@ Four skills, each self-contained and installable independently:
 | [`mdwds/`](mdwds/) | Build Maryland.gov pages with the Maryland Web Design System — correct markup for every component, the right page shell, the required statewide banner, and template recipes for common page types. Pinned to MDWDS `0.51.1`. |
 | [`maryland-imap/`](maryland-imap/) | Query Maryland's official geospatial services (`mdgeodata.md.gov`) — boundary layers for counties, municipalities, legislative districts, and ZIP codes, plus the geocoder. |
 | [`socrata-api/`](socrata-api/) | Query any Socrata-powered open-data portal (`opendata.maryland.gov`, `data.cdc.gov`, and hundreds more) with correct SoQL, authentication, and pagination patterns. |
-| [`pdf-accessibility/`](pdf-accessibility/) | Scan and remediate PDFs end-to-end against PDF/UA-1 (ISO 14289-1) using an OSS pipeline — no Adobe Acrobat Pro required. Battle-tested on real reports. |
+| [`pdf-accessibility/`](pdf-accessibility/) | Scan and remediate PDFs end-to-end against PDF/UA-1 (ISO 14289-1) using a self-contained open-source pipeline. Battle-tested on real reports. |
 
 Without a skill, an agent asked to "build a Maryland.gov agency page" will hallucinate class names, miss the statewide banner requirement, or wrap the page in inline `<style>` to patch over not knowing MDWDS's design tokens. With a skill, it reads the component references first and produces correct, auditable markup on the first try. Same story for geospatial, open-data, and PDF-accessibility work — all three domains have enough state-specific or format-specific gotchas that a general-purpose agent gets them wrong without guidance.
 

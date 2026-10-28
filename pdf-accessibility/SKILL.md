@@ -1,6 +1,6 @@
 ---
 name: pdf-accessibility
-description: Use when auditing or remediating a PDF for accessibility, PDF/UA (ISO 14289-1), or WCAG conformance; when asked "is this PDF accessible?", "scan this PDF", "fix this PDF for screen readers", "add alt text / tags / metadata to a PDF"; or when deciding whether to retrofit a PDF, regenerate it from source, or publish an accessible HTML alternative. Self-contained OSS pipeline using opendataloader-pdf (auto-tagging), pikepdf (metadata + structure edits), veraPDF (validation), and vision subagents (alt text). No Adobe Acrobat Pro required.
+description: Use when auditing or remediating a PDF for accessibility, PDF/UA (ISO 14289-1), or WCAG conformance; when asked "is this PDF accessible?", "scan this PDF", "fix this PDF for screen readers", "add alt text / tags / metadata to a PDF"; or when deciding whether to retrofit a PDF, regenerate it from source, or publish an accessible HTML alternative. Self-contained open-source pipeline using opendataloader-pdf (auto-tagging), pikepdf (metadata + structure edits), veraPDF (validation), and vision subagents (alt text).
 ---
 
 # PDF Accessibility Skill
