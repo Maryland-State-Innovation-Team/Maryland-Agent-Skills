@@ -69,11 +69,17 @@ def main():
             ok = False
         diffs = []
         for i, (pa, pb) in enumerate(zip(a, b), 1):
-            # Ignore anti-aliasing noise (a few levels of 255) from re-encoding;
-            # a dropped header or missing glyph differs by far more than this.
+            # Two-tier test. Anti-aliasing noise from re-encoding is tiny and
+            # sparse (measured: max 11/255 on 2 pixels). A dropped element is
+            # either strong (any pixel > 32) or, for a faint hairline, weak but
+            # spread along its length (> 20 pixels above 8). Either fails.
             d = ImageChops.difference(Image.open(pa).convert("RGB"),
                                       Image.open(pb).convert("RGB")).convert("L")
-            bbox = d.point(lambda v: 255 if v > 32 else 0).getbbox()
+            hist = d.histogram()
+            strong = sum(hist[33:])
+            weak = sum(hist[9:])
+            bbox = d.point(lambda v: 255 if v > 8 else 0).getbbox() \
+                if (strong or weak > 20) else None
             if bbox:
                 diffs.append((i, bbox))
         if diffs:
@@ -81,7 +87,7 @@ def main():
             for i, bbox in diffs:
                 print(f"FAIL page {i} renders differently (diff bbox {bbox} at {dpi} dpi)")
         else:
-            print(f"PASS all {len(a)} pages render identically (tolerance 32/255) at {dpi} dpi")
+            print(f"PASS all {len(a)} pages render identically (no pixel > 32/255; ≤ 20 pixels > 8/255) at {dpi} dpi")
 
     # 2. Orphaned MCIDs
     pdf = pikepdf.open(fixed)

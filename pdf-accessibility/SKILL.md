@@ -5,7 +5,7 @@ description: Use when auditing or remediating a PDF for accessibility, PDF/UA (I
 
 # PDF Accessibility Skill
 
-An opinionated, OSS-first workflow for making PDFs pass PDF/UA-1 (ISO 14289-1) **and** actually read correctly in a screen reader. Two paths: auto-tag an untagged PDF (Path A), or repair the tree of an already-tagged one (Path B). It covers scanning, tagging or repair, metadata, alt text, structural cleanup, and verification, and includes the scripts for each step. It has been tested on InDesign-exported reports, a tagged InDesign playbook, and gallery-walk posters. All of them went from hundreds of failed checks to zero, with renders that stayed pixel-identical.
+An opinionated, OSS-first workflow for making PDFs pass PDF/UA-1 (ISO 14289-1) **and** actually read correctly in a screen reader. Two paths: auto-tag an untagged PDF (Path A), or repair the tree of an already-tagged one (Path B). It covers scanning, tagging or repair, metadata, alt text, structural cleanup, and verification, and includes the scripts for each step. It has been tested on InDesign-exported reports, a tagged InDesign playbook, and gallery-walk posters. All of them went from hundreds of failed checks to zero, with renders that stayed unchanged.
 
 ## When to use this skill
 
@@ -48,7 +48,7 @@ input.pdf (Tagged: yes)
   [3] pdftocairo pages + extract_figure_images.py ── see layout and each figure
   [4] write plans/<doc>.json ──────── retag / reorder / artifact / alt / tables
   [5] fix_tagged_pdf.py plan in out ─ applies plan + always-on fixes
-  [6] verapdf + verify_remediation.py ─ PASS, pixel-identical, 0 orphaned MCIDs
+  [6] verapdf + verify_remediation.py ─ PASS, renders unchanged, 0 orphaned MCIDs
 ```
 
 The plan format, a decision guide for headings, reading order and figures, and the usual InDesign export problems are all in [references/tagged-pdf-plans.md](references/tagged-pdf-plans.md). There's an annotated example in `scripts/tagged_pdf_plan.example.json`.
@@ -361,10 +361,12 @@ Authoritative spec: ISO 14289-1:2014. Rule-by-rule plain-language guidance: PDF 
 - **Expect duplicate /Figure elements per page.** Gallery-walk / poster-style PDFs frequently have 5–11 `/Figure` structure elements on a single composed page. The extraction falls back to full-page renders for each. Dedup by sha1 before running vision; apply the same alt to all duplicates.
 - **Shared Form XObjects are a specific trap.** Branded page headers rendered as shared Form XObjects fail PDF/UA when auto-tagged with MCIDs. The fix is to treat them as artifact, not to try to make them structurally unique. The right long-term fix is in the authoring tool.
 - **If the PDF has a sibling HTML version, that's the accessible version.** Script-fix the PDF's metadata so viewers announce the title; point users at the HTML for the real reading experience.
-- **CMS upload scanners read PDFs differently from veraPDF.** Drupal's [pdfa11y](https://www.drupal.org/project/pdfa11y) module collects headings from every object with an `/S` name **in file object order**, not by walking the structure tree. Its PHP parser (smalot/pdfparser) appears to misread custom tag names such as `/H5_Overline` as `/H5`. It also falls back to regex-scanning compressed object streams. Three PDFs that passed veraPDF were flagged anyway:
-  - "skip from H1 to H5": a leftover InDesign style name;
-  - "skip from H2 to H4": InDesign's object order doesn't follow reading order;
-  - "first heading is H2": the same object-order problem.
+- **CMS upload scanners read PDFs differently from veraPDF.** Drupal's [pdfa11y](https://www.drupal.org/project/pdfa11y) module collects headings from every object with an `/S` name **in file object order**, not by walking the structure tree. Its PHP parser (smalot/pdfparser) appears to misread custom tag names such as `/H5_Overline` as `/H5`. It also falls back to regex-scanning compressed object streams. Three PDFs drew four warnings between them, even though the first two passed veraPDF:
+  - the playbook drew two, one per upload:
+    - "skip from H1 to H5": a leftover InDesign style name;
+    - "skip from H2 to H4": InDesign's object order doesn't follow reading order;
+  - the MCC gallery walk drew "first heading is H2": the same object-order problem;
+  - an image-only gallery walk drew "no headings" (see the next lesson).
 
   The fix is `normalize_struct_order.py`. It flattens the RoleMap, gives every element an `/ID` in reading order, and lists them in `/IDTree`. Because qpdf numbers objects breadth-first in sorted-key order, and `/IDTree` sorts before `/K`, that puts every element in reading order in the file. It then writes without object streams. Run `verify_remediation.py` before uploading; its scanner emulation reproduced all four warnings Drupal gave us.
 - **Image-only PDFs can't pass a heading check.** A PDF made of page-sized JPEGs (e.g. `img2pdf` output) has no text to tag as a heading. Alt text on each page image satisfies PDF/UA 7.3, but scanners correctly report "no headings". The fixes are, in order of preference: an HTML version, a re-export from the source file, or OCR to add a real text layer (e.g. `ocrmypdf` with tesseract) followed by Path A.
@@ -386,7 +388,7 @@ Authoritative spec: ISO 14289-1:2014. Rule-by-rule plain-language guidance: PDF 
 - **Ligatures can truncate link text.** A Link element can end mid-word at a ﬁ ligature ("Building fi…"). Check link labels, and override them with `link_labels`.
 - **Prune empty elements, but not table cells.** Removing an empty header `TD` makes rows span different column counts (7.2-42).
 - **Map MCIDs to text with pdfminer.** `pdf2txt.py -t tag file.pdf` emits every marked-content sequence with its MCID. Through the API, pass a `BytesIO` with `codec="utf-8"`, because the tag writer emits bytes.
-- **Content-stream edits must be pixel-neutral.** Every structural fix here (retag, reorder, artifact wrapping) should leave the renders identical. Diff them (`verify_remediation.py`). A changed pixel means a paint operator was dropped or reordered.
+- **Content-stream edits must be render-neutral.** Every structural fix here (retag, reorder, artifact wrapping) should leave the renders unchanged, apart from anti-aliasing noise. Measured noise was at most 11/255 on 2 pixels, while a deleted 0.25 pt header rule changed 766 pixels by up to 170. `verify_remediation.py` fails a page if any pixel differs by more than 32/255, or if more than 20 pixels differ by more than 8/255. A failure means a paint operator was dropped or reordered.
 - **Verify PDF/UA, test with a real screen reader.** The validator confirms every `/Figure` has `/Alt` but not that the `/Alt` says anything useful. NVDA (Windows) or VoiceOver (macOS) sanity-check in <5 minutes.
 
 ## HTML alternative pattern

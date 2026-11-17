@@ -60,7 +60,7 @@ def preorder(st):
     return out
 
 
-def flatten_rolemap(st, elements):
+def flatten_rolemap(pdf, st, elements):
     rolemap = {str(k): str(v) for k, v in st.get("/RoleMap", {}).items()}
 
     def resolve(s, seen=()):
@@ -68,7 +68,15 @@ def flatten_rolemap(st, elements):
             return resolve(rolemap[s], seen + (s,))
         return s
     renamed = 0
-    for n in elements:
+    # Rename every structure element in the file, not just the reachable
+    # ones: once the RoleMap is gone, an unreachable custom tag would have no
+    # mapping at all (and naive scanners read unreachable objects too).
+    seen = {n.objgen for n in elements}
+    extra = [o for o in pdf.objects
+             if isinstance(o, Dictionary) and "/S" in o and "/P" in o
+             and isinstance(o.S, Name) and o.objgen not in seen
+             and o.get("/Type") in (None, Name("/StructElem"))]
+    for n in list(elements) + extra:
         s = str(n.S)
         if s in rolemap:
             n.S = Name(resolve(s))
@@ -102,7 +110,7 @@ def build_idtree(st, elements):
 def normalize(pdf):
     st = pdf.Root.StructTreeRoot
     elements = preorder(st)
-    renamed = flatten_rolemap(st, elements)
+    renamed = flatten_rolemap(pdf, st, elements)
     build_idtree(st, elements)
     return len(elements), renamed
 

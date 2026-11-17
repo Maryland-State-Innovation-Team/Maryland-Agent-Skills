@@ -240,9 +240,23 @@ def main():
         el = arr[int(a["mcid"])] if arr is not None else None
         if not is_se(el):
             sys.exit(f"attach: no structure element owns MCID {a['mcid']} on page {a['page']}")
-        while "/P" in el and is_se(el.P) and el.P.objgen != st.objgen:
+        # Climb to the top of the detached subtree: stop at the first element
+        # whose /P doesn't actually list it among its kids. That catches both
+        # a missing /P and a stale /P pointing at an in-tree parent that has
+        # dropped it (the common way InDesign content goes missing).
+        def listed_by_parent(e):
+            par = e.get("/P")
+            return is_se(par) and any(is_se(c) and c.objgen == e.objgen for c in kids_list(par))
+        while listed_by_parent(el):
             el = el.P
-        if "/P" in el and el.P.objgen == st.objgen:
+        reachable = set()
+
+        def mark(n):
+            reachable.add(n.objgen)
+            for c in struct_kids(n):
+                mark(c)
+        mark(top)
+        if el.objgen in reachable:
             sys.exit(f"attach: MCID {a['mcid']} on page {a['page']} is already in the tree")
         if "/Pg" not in el:
             el.Pg = page.obj
