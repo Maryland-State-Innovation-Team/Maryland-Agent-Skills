@@ -25,6 +25,15 @@ Plan keys (all optional except title/lang)
   alt        {path: "text"} set /Alt on a Figure (replaces existing Alt)
   actual_text {path: "text"} set /ActualText (e.g. join a two-line heading
                             "Barrier 1" / "Unclear value" into one phrase)
+  attach     [{"parent": path, "page": N, "mcid": M}, …]
+                            re-attach structure that is detached from the
+                            tree (outline_struct.py lists it under
+                            "ORPHANED CONTENT"). The detached element owning
+                            that MCID — climbing to the top of its detached
+                            subtree — is appended as the LAST structure kid
+                            of `parent`. Attaches run before every other key,
+                            so existing paths don't shift and the attached
+                            element's path is parent.<previous kid count>.
   link_labels {uri_prefix: "label"}
                             override the auto-derived Link /Contents when the
                             tagged link text is truncated or unhelpful
@@ -33,8 +42,10 @@ Plan keys (all optional except title/lang)
   set_children {path: [path, ...]}
                             replace an element's structure kids with exactly
                             these elements, in this order (moves elements
-                            between parents; anything not listed is dropped
-                            from that parent — list everything you keep)
+                            between parents, detaching them from the old
+                            parent automatically; anything not listed is
+                            dropped from that parent — list everything you
+                            keep, and don't list artifacted figures)
   tables     {path: {"header_row": true, "header_col": true}}
                             convert first-row / first-column cells to TH with
                             /Scope Column / Row
@@ -49,10 +60,15 @@ Always-on fixes
   * untagged paint operators on page content -> /Artifact BMC … EMC
   * remove structure elements left with no content
   * strip /CIDSet from font descriptors (clause 7.21.4.2)
+  * normalize_struct_order (run last): flatten the RoleMap to standard tag
+    names, renumber structure elements into reading order via /IDTree,
+    write without object streams, PDF version >= 1.7. Needed for naive
+    upload scanners that read raw tag names in object-number order.
 """
 import json
 import re
 import sys
+from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name, Operator, String
@@ -208,6 +224,31 @@ def main():
     st = pdf.Root.StructTreeRoot
     top = st.K if is_se(st.K) else st.K[0]
 
+    known = {"title", "lang", "retag", "alt", "actual_text", "artifact", "set_children",
+             "tables", "layout_tables", "link_labels", "attach"}
+    for key in plan:
+        if key not in known and not key.startswith("_"):
+            print(f"WARNING: unknown plan key {key!r} ignored (prefix comments with '_')",
+                  file=sys.stderr)
+
+    # Re-attach detached structure first, so later paths can address it.
+    parent_tree = pikepdf.NumberTree(st.ParentTree)
+    for a in plan.get("attach", []):
+        parent = resolve(top, a["parent"])
+        page = pdf.pages[int(a["page"]) - 1]
+        arr = parent_tree.get(int(page.obj.StructParents))
+        el = arr[int(a["mcid"])] if arr is not None else None
+        if not is_se(el):
+            sys.exit(f"attach: no structure element owns MCID {a['mcid']} on page {a['page']}")
+        while "/P" in el and is_se(el.P) and el.P.objgen != st.objgen:
+            el = el.P
+        if "/P" in el and el.P.objgen == st.objgen:
+            sys.exit(f"attach: MCID {a['mcid']} on page {a['page']} is already in the tree")
+        if "/Pg" not in el:
+            el.Pg = page.obj
+        el.P = parent
+        set_kids(parent, kids_list(parent) + [el])
+
     # Resolve every path against the original tree first.
     R = lambda p: resolve(top, p)
     retag = [(R(p), s) for p, s in plan.get("retag", {}).items()]
@@ -228,7 +269,6 @@ def main():
         n.ActualText = String(a)
 
     # Decorative figures -> artifacts.
-    parent_tree = pikepdf.NumberTree(st.ParentTree)
     for n in arts:
         pg = n.get("/Pg")
         mcids = [int(c) for c in kids_list(n) if not isinstance(c, Dictionary)]
@@ -249,6 +289,11 @@ def main():
     for parent, kids in children:
         keep_nonse = [c for c in kids_list(parent) if not is_se(c)]
         for c in kids:
+            # Detach from a previous parent so no element is listed twice.
+            old = c.get("/P")
+            if is_se(old) and old.objgen != parent.objgen:
+                set_kids(old, [x for x in kids_list(old)
+                               if not (is_se(x) and x.objgen == c.objgen)])
             c.P = parent
         set_kids(parent, kids + keep_nonse)
 
@@ -340,7 +385,12 @@ def main():
         meta["pdfuaid:part"] = "1"
     pdf.Root.MarkInfo = Dictionary(Marked=True)
 
-    pdf.save(dst)
+    # Last: flatten RoleMap, renumber elements into reading order, PDF >= 1.7
+    # (see normalize_struct_order.py for why naive scanners need this).
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from normalize_struct_order import normalize, save
+    normalize(pdf)
+    save(pdf, dst)
     print(f"wrote {dst}")
 
 

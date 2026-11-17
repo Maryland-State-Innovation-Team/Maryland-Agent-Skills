@@ -17,7 +17,7 @@ script:
   3. Removes any structure-tree entries that referenced the stripped
      MCIDs via these Form XObjects.
   4. Wraps each invocation of these Form XObjects in each page's content
-     stream with `/Artifact BDC ... EMC`.
+     stream with `/Artifact BMC ... EMC`.
 
 This loses structural tagging on the branding text (which is appropriate
 — repeating page furniture should be artifact), but keeps the visual
@@ -54,7 +54,7 @@ def strip_mcid_blocks(content: bytes) -> tuple[bytes, list[int]]:
 
 
 def wrap_xobjects_as_artifact(content: bytes, names: set[str]) -> tuple[bytes, int]:
-    """Wrap each matching /Name Do operator with /Artifact BDC ... EMC."""
+    """Wrap each matching /Name Do operator with /Artifact BMC ... EMC."""
     count = [0]
 
     def repl(m: re.Match) -> bytes:
@@ -62,7 +62,7 @@ def wrap_xobjects_as_artifact(content: bytes, names: set[str]) -> tuple[bytes, i
         if name not in names:
             return m.group(0)
         count[0] += 1
-        return b"/Artifact BDC " + m.group(0) + b" EMC"
+        return b"/Artifact BMC " + m.group(0) + b" EMC"  # BMC: one operand (BDC needs two)
 
     new = XOBJ_DO_RE.sub(repl, content)
     return new, count[0]

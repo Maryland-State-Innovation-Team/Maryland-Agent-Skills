@@ -15,6 +15,10 @@ An opinionated, OSS-first workflow for making PDFs pass PDF/UA-1 (ISO 14289-1) *
 - The user is publishing a PDF to a government or public-facing site and needs it to meet accessibility requirements.
 - A designer's InDesign (or Word) export is "tagged" but reads wrong: no real headings, scrambled order, icons announced as images.
 
+## What this skill can and can't promise
+
+Automated tools (veraPDF, the scripts here, CMS upload checkers) catch the machine-checkable part of PDF accessibility. They aren't comprehensive. They can't tell whether reading order makes sense, whether alt text says anything useful, or whether the source document was written accessibly in the first place. Pair this pipeline with content-editor and designer training on creating accessible documents at the source: heading styles, alt text, export settings. Also have a person review every judgment call the pipeline makes. Remediating after the fact is a backstop, not a substitute.
+
 ## The one rule that beats every other decision
 
 **For text-heavy PDFs that are also publishable as HTML, the fastest and highest-quality accessibility fix is an HTML version at a stable URL.** Retrofitting tags into a 30-page report PDF is multi-day work; a styled HTML page with semantic headings, real alt text, and screen-reader transcripts is often faster to build and is strictly more accessible. Keep the PDF for print/offline, point the "accessible version" link at the HTML.
@@ -97,7 +101,8 @@ All of these are in `scripts/`, and each one documents its usage in its docstrin
 | `strip_cidset.py` | A | Remove incomplete `/CIDSet` (7.21.4.2) |
 | `apply_alt_text.py` | A | Write `alts.json` onto `/Figure` elements in document order |
 | `fix_shared_form_xobjects.py` | A | Fix 7.20.2 (shared Form XObject with MCIDs) |
-| `verify_remediation.py` | both | Pixel-diff renders and find orphaned MCIDs; print heading/figure summary |
+| `normalize_struct_order.py` | both (last step) | Make simple upload scanners agree with the tree: flatten the RoleMap to standard tag names, renumber elements into reading order, PDF ≥ 1.7. Built into `fix_tagged_pdf.py` |
+| `verify_remediation.py` | both | Pixel-diff renders, find orphaned MCIDs, emulate a Drupal-style upload scanner, print heading/figure summary |
 
 ## Install the tools
 
@@ -356,6 +361,14 @@ Authoritative spec: ISO 14289-1:2014. Rule-by-rule plain-language guidance: PDF 
 - **Expect duplicate /Figure elements per page.** Gallery-walk / poster-style PDFs frequently have 5–11 `/Figure` structure elements on a single composed page. The extraction falls back to full-page renders for each. Dedup by sha1 before running vision; apply the same alt to all duplicates.
 - **Shared Form XObjects are a specific trap.** Branded page headers rendered as shared Form XObjects fail PDF/UA when auto-tagged with MCIDs. The fix is to treat them as artifact, not to try to make them structurally unique. The right long-term fix is in the authoring tool.
 - **If the PDF has a sibling HTML version, that's the accessible version.** Script-fix the PDF's metadata so viewers announce the title; point users at the HTML for the real reading experience.
+- **CMS upload scanners read PDFs differently from veraPDF.** Drupal's [pdfa11y](https://www.drupal.org/project/pdfa11y) module collects headings from every object with an `/S` name **in file object order**, not by walking the structure tree. Its PHP parser (smalot/pdfparser) appears to misread custom tag names such as `/H5_Overline` as `/H5`. It also falls back to regex-scanning compressed object streams. Three PDFs that passed veraPDF were flagged anyway:
+  - "skip from H1 to H5": a leftover InDesign style name;
+  - "skip from H2 to H4": InDesign's object order doesn't follow reading order;
+  - "first heading is H2": the same object-order problem.
+
+  The fix is `normalize_struct_order.py`. It flattens the RoleMap, gives every element an `/ID` in reading order, and lists them in `/IDTree`. Because qpdf numbers objects breadth-first in sorted-key order, and `/IDTree` sorts before `/K`, that puts every element in reading order in the file. It then writes without object streams. Run `verify_remediation.py` before uploading; its scanner emulation reproduced all four warnings Drupal gave us.
+- **Image-only PDFs can't pass a heading check.** A PDF made of page-sized JPEGs (e.g. `img2pdf` output) has no text to tag as a heading. Alt text on each page image satisfies PDF/UA 7.3, but scanners correctly report "no headings". The fixes are, in order of preference: an HTML version, a re-export from the source file, or OCR to add a real text layer (e.g. `ocrmypdf` with tesseract) followed by Path A.
+- **Validate the remediation scripts' own output, not just the PDF.** An early version of `fix_shared_form_xobjects.py` wrote `/Artifact BDC` with one operand. That's malformed: `BDC` needs a property list, while `BMC` takes just the tag. veraPDF still passed, but poppler silently dropped the running header from every page. `verify_remediation.py`'s render diff catches this class of bug. Also run `pdftotext file.pdf /dev/null` and treat any "Syntax Error" as a failure.
 - **Passing veraPDF is far from accessible.** On the tagged InDesign playbook, veraPDF's 11 failed rules missed the worst problems:
   - every heading was tagged as a paragraph (the validator flagged only one skipped level);
   - the footnotes were tagged as headings;
@@ -398,6 +411,6 @@ This is strictly better than a tagged PDF for most readers (searchable, responsi
 4. **For untagged PDFs, recommend rebuilding from source first.** Retrofitting tags is slower and lower-quality than a clean re-export from InDesign / Word / LibreOffice with "Create Tagged PDF" on.
 5. **Never remove tags to make the validator pass.** Fix the tag, or re-mark the content as an artifact. Removing an element is only correct when its content is re-marked as `/Artifact` in the same edit (decorative figures, or empty wrappers left behind), so that no real content ends up untagged or orphaned.
 6. **Repair, don't replace, an existing tag tree.** If the PDF is tagged, use Path B.
-7. **A validator pass is necessary, not sufficient.** Before calling a PDF done, review the heading outline and reading order against the rendered pages, and confirm `verify_remediation.py` passes.
+7. **A validator pass is necessary, not sufficient.** Before calling a PDF done, review the heading outline and reading order against the rendered pages, and confirm `verify_remediation.py` passes. That includes its upload-scanner emulation, if the PDF is going into a CMS that checks uploads.
 8. **For repeating page headers/footers, Artifact is the right pattern.** PDF/UA treats this as decorative content that screen readers skip.
 9. **Prefer HTML alternatives for text-heavy public-facing documents.** Link PDF for print; link HTML for screen readers and the "read it online" case, which is most people.

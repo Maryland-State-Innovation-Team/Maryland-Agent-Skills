@@ -14,10 +14,15 @@ Checks
    the ParentTree, to a structure element that is still reachable from
    StructTreeRoot. Content that fails this is invisible to screen readers
    even though veraPDF may still pass (it only sees what's in the tree).
-3. Outline summary. Prints the heading sequence (with skipped levels
+3. Upload-scanner emulation, modeled on Drupal's pdfa11y module: tagged,
+   has a title that isn't a filename, has /Lang, PDF version >= 1.4, and
+   headings read in *object-number order* with raw tag names must exist,
+   start at H1, and never skip a level (no heading-like custom names such
+   as /H5_Overline). Stricter than pdfa11y on purpose.
+4. Outline summary. Prints the heading sequence (with skipped levels
    flagged) and every Figure's /Alt so a human can eyeball both.
 
-Exit code 0 if checks 1 and 2 pass, 1 otherwise.
+Exit code 0 if checks 1–3 pass, 1 otherwise.
 Needs: pikepdf, Pillow, pdftocairo (poppler-utils).
 """
 import subprocess
@@ -64,8 +69,11 @@ def main():
             ok = False
         diffs = []
         for i, (pa, pb) in enumerate(zip(a, b), 1):
-            bbox = ImageChops.difference(Image.open(pa).convert("RGB"),
-                                         Image.open(pb).convert("RGB")).getbbox()
+            # Ignore anti-aliasing noise (a few levels of 255) from re-encoding;
+            # a dropped header or missing glyph differs by far more than this.
+            d = ImageChops.difference(Image.open(pa).convert("RGB"),
+                                      Image.open(pb).convert("RGB")).convert("L")
+            bbox = d.point(lambda v: 255 if v > 32 else 0).getbbox()
             if bbox:
                 diffs.append((i, bbox))
         if diffs:
@@ -73,7 +81,7 @@ def main():
             for i, bbox in diffs:
                 print(f"FAIL page {i} renders differently (diff bbox {bbox} at {dpi} dpi)")
         else:
-            print(f"PASS all {len(a)} pages render pixel-identical at {dpi} dpi")
+            print(f"PASS all {len(a)} pages render identically (tolerance 32/255) at {dpi} dpi")
 
     # 2. Orphaned MCIDs
     pdf = pikepdf.open(fixed)
@@ -118,7 +126,57 @@ def main():
     else:
         print(f"PASS all {total} page MCIDs reachable from the structure tree")
 
-    # 3. Outline summary (informational)
+    # 3. Upload-scanner emulation, modeled on Drupal's pdfa11y module
+    #    (https://www.drupal.org/project/pdfa11y, smalot/pdfparser-based).
+    #    It collects heading levels from every object with an /S name in
+    #    *object order* (not tree order), and its parser can misread custom
+    #    names such as /H5_Overline as H5. We are deliberately stricter: raw
+    #    names, no RoleMap. Fix heading failures with normalize_struct_order.py.
+    import re
+    naive = []
+    mark = pdf.Root.get("/MarkInfo")
+    if not (isinstance(mark, pikepdf.Dictionary) and bool(mark.get("/Marked", False))):
+        naive.append("not tagged (/MarkInfo /Marked true missing)")
+    title = str(pdf.docinfo.get("/Title", "")).strip()
+    if not title:
+        try:
+            with pdf.open_metadata() as meta:
+                title = str(meta.get("dc:title", "")).strip()
+        except Exception:
+            pass
+    if not title:
+        naive.append("no document title")
+    elif re.search(r"\.(pdf|docx?|xlsx?|pptx?|indd|txt|rtf|odt|ods|odp)$", title, re.I):
+        naive.append(f'title "{title}" looks like a filename')
+    if not str(pdf.Root.get("/Lang", "")).strip():
+        naive.append("no document language (/Lang)")
+    version = float(pdf.pdf_version)
+    heads = sorted((o.objgen[0], str(o.S)) for o in pdf.objects
+                   if is_se(o) and "/P" in o and re.match(r"/[Hh]\d", str(o.S)))
+    levels = [int(re.match(r"/[Hh](\d)", s).group(1)) for _, s in heads]
+    if version < 1.4:
+        naive.append(f"PDF version {pdf.pdf_version} < 1.4")
+    if not levels:
+        naive.append("no headings (H1-H6) in the structure tree")
+    elif levels[0] != 1:
+        naive.append(f"first heading in object order is H{levels[0]}, not H1")
+    last = 0
+    for (num, s), lvl in zip(heads, levels):
+        if lvl > last + 1 and last:
+            naive.append(f"object-order skip H{last} -> H{lvl} (obj {num}, tag {s})")
+        last = lvl
+    odd = sorted({s for _, s in heads if not re.fullmatch(r"/H[1-6]", s)})
+    if odd:
+        naive.append(f"heading-like custom tag names: {', '.join(odd)}")
+    if naive:
+        ok = False
+        for m in naive:
+            print(f"FAIL upload scanner (pdfa11y-style): {m}")
+    else:
+        print(f"PASS upload-scanner emulation (tagged, titled, lang set, PDF {pdf.pdf_version}, "
+              f"{len(levels)} headings in object order starting at H1, no skips)")
+
+    # 4. Outline summary (informational)
     rolemap = {str(k): str(v) for k, v in st.get("/RoleMap", {}).items()}
     print("\nHeading sequence / figures (review by eye):")
     last = 0
@@ -135,7 +193,7 @@ def main():
             last = lvl
         elif std == "/Figure":
             alt = str(n.get("/Alt", "")).strip()
-            print(f"  [Figure] {alt[:100] if alt else '(NO ALT)'}")
+            print(f"  [Figure] {alt if alt else '(NO ALT)'}")
         for c in kids(n):
             if is_se(c):
                 outline(c)

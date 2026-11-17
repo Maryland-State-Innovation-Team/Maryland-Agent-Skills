@@ -11,7 +11,11 @@ Leaf-level text containers (Span, Lbl, LBody) are folded into their parent
 so the output stays readable; text is shown on the deepest element that
 contains only those. ActualText, where present, replaces the content text.
 
-Usage: python3 outline_struct.py <input.pdf> [--width 90]
+Ends with an "ORPHANED CONTENT" list when some marked content belongs to
+structure elements that are detached from the tree (screen readers never
+reach it); re-attach those with the fix_tagged_pdf.py plan's "attach" key.
+
+Usage: python3 outline_struct.py <input.pdf> [--width 90]   (--width 0 = no truncation)
 Needs: pikepdf, pdfminer.six  (MCID → text via pdfminer's "tag" output)
 """
 import html
@@ -52,7 +56,7 @@ def main():
     width = 90
     if "--width" in args:
         i = args.index("--width")
-        width = int(args[i + 1])
+        width = int(args[i + 1]) or 10**9
         del args[i:i + 2]
     src = args[0]
     pdf = pikepdf.open(src)
@@ -98,7 +102,7 @@ def main():
         leafish = all(str(c.S) in FOLD for c in sub)
         p = first_page(n)
         mapped = f"→{rolemap[s]}" if s in rolemap else ""
-        alt = f" Alt={str(n.Alt)[:50]!r}" if "/Alt" in n else ""
+        alt = f" Alt={str(n.Alt)[:width]!r}" if "/Alt" in n else ""
         t = re.sub(r"\s+", " ", text(n)).strip()[:width] if leafish else ""
         print(f"{'  ' * depth}{path} {s}{mapped} p{p + 1 if p is not None else '?'}{alt} | {t}")
         if not leafish:
@@ -107,6 +111,34 @@ def main():
 
     tops = [c for c in kids(st) if is_se(c)]
     walk(tops[0], 0, "0")
+
+    # Content whose structure element is not reachable from the tree is never
+    # read by screen readers. List it so the plan can re-attach it ("attach").
+    reach = set()
+
+    def mark(n):
+        reach.add(n.objgen)
+        for c in kids(n):
+            if is_se(c):
+                mark(c)
+    for t in tops:
+        mark(t)
+    nt = pikepdf.NumberTree(st.ParentTree)
+    orphans = []
+    for pi, page in enumerate(pdf.pages):
+        sp = page.obj.get("/StructParents")
+        arr = nt.get(int(sp)) if sp is not None else None
+        if arr is None:
+            continue
+        for m, e in enumerate(arr):
+            if is_se(e) and e.objgen not in reach:
+                t = re.sub(r"\s+", " ", txt.get((pi, m), "")).strip()
+                orphans.append((pi + 1, m, str(e.S), t))
+    if orphans:
+        print("\nORPHANED CONTENT (in the ParentTree but unreachable from the tree; "
+              "screen readers skip it — re-attach with the plan's 'attach' key):")
+        for pg, m, s_, t in orphans:
+            print(f"  page {pg} MCID {m} {s_} | {t[:width]}")
 
 
 if __name__ == "__main__":

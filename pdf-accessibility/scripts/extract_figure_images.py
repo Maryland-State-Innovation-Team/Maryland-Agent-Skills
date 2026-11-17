@@ -65,6 +65,26 @@ def walk_figures(node, path="", pageref=None):
         yield from walk_figures(k, f"{path}/0", pg)
 
 
+def plan_paths(root):
+    """{objgen: dotted path} counting structure-element kids only, matching
+    outline_struct.py and fix_tagged_pdf.py (walk_figures' slash path counts
+    MCIDs and OBJRs too, so it diverges under mixed-content parents)."""
+    def se_kids(n):
+        k = n.get("/K")
+        ks = list(k) if isinstance(k, pikepdf.Array) else ([] if k is None else [k])
+        return [c for c in ks if isinstance(c, pikepdf.Dictionary) and "/S" in c]
+    out = {}
+
+    def walk(n, p):
+        out[n.objgen] = p
+        for i, c in enumerate(se_kids(n)):
+            walk(c, f"{p}.{i}")
+    tops = se_kids(root)
+    if tops:
+        walk(tops[0], "0")
+    return out
+
+
 def all_mcids(node):
     """Every MCID directly or indirectly owned by a structure element."""
     out = []
@@ -205,6 +225,7 @@ def main() -> int:
             root = pdf.Root.get("/StructTreeRoot")
             if root is None: continue
             figs = list(walk_figures(root))
+            ppaths = plan_paths(root)
             cache = {}
             for i, (fig, mcids, pg, path) in enumerate(figs):
                 mcid = mcids[0] if mcids else None
@@ -244,6 +265,8 @@ def main() -> int:
                 manifest[name].append({
                     "index": i,
                     "path": str(path),
+                    # Same addressing as outline_struct.py / fix_tagged_pdf.py plans.
+                    "plan_path": ppaths.get(fig.objgen),
                     "page": page_idx + 1 if page_idx is not None else None,
                     "mcid": mcid,
                     "mcids": mcids,
