@@ -1,3 +1,4 @@
 .env
 context/
 test-site.html
+__pycache__
